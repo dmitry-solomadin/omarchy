@@ -153,6 +153,75 @@ assertEqual(
   weather.iconForCode(389, false),
   'weather picks hourly forecast icon nearest noon'
 )
+
+// ---- Sky scenes behind the popup.
+assertDeepEqual(
+  weather.resolveSkyScene({ openMeteoWeatherCode: 0, isDay: 1, windspeedKmph: '8' }, ''),
+  { scene: 'sun', night: false, level: 1, hail: false, windy: false },
+  'weather resolves a clear day to the sun scene'
+)
+assertEqual(weather.resolveSkyScene({ openMeteoWeatherCode: 0, isDay: 0 }, '').night, true, 'weather resolves night from the Open-Meteo day flag')
+assertEqual(weather.resolveSkyScene({ openMeteoWeatherCode: 2, isDay: 1 }, '').scene, 'partly', 'weather resolves partly cloudy codes')
+assertEqual(weather.resolveSkyScene({ openMeteoWeatherCode: 3, isDay: 1 }, '').scene, 'clouds', 'weather resolves overcast')
+assertEqual(weather.resolveSkyScene({ openMeteoWeatherCode: 45, isDay: 1 }, '').scene, 'fog', 'weather resolves fog')
+assertDeepEqual(
+  [51, 61, 63, 65, 80, 82].map(code => weather.resolveSkyScene({ openMeteoWeatherCode: code, isDay: 1 }, '')).map(r => r.scene + r.level),
+  ['rain0', 'rain0', 'rain1', 'rain2', 'rain0', 'rain2'],
+  'weather grades drizzle, rain and showers into three rain intensities'
+)
+assertDeepEqual(
+  [71, 73, 75, 77, 85, 86].map(code => weather.resolveSkyScene({ openMeteoWeatherCode: code, isDay: 1 }, '')).map(r => r.scene + r.level),
+  ['snow0', 'snow1', 'snow2', 'snow0', 'snow0', 'snow2'],
+  'weather grades snow into three intensities'
+)
+assertDeepEqual(
+  [56, 66, 67].map(code => weather.resolveSkyScene({ openMeteoWeatherCode: code, isDay: 1 }, '')).map(r => r.scene + r.level),
+  ['sleet0', 'sleet1', 'sleet2'],
+  'weather resolves freezing drizzle and rain to sleet'
+)
+assertDeepEqual(
+  weather.resolveSkyScene({ openMeteoWeatherCode: 96, isDay: 0 }, ''),
+  { scene: 'storm', night: true, level: 2, hail: true, windy: false },
+  'weather resolves a hail thunderstorm'
+)
+assertEqual(weather.resolveSkyScene({ openMeteoWeatherCode: 95, isDay: 1 }, '').hail, false, 'weather keeps plain thunderstorms hail-free')
+assertEqual(weather.resolveSkyScene({ openMeteoWeatherCode: 1, isDay: 1, windspeedKmph: '31' }, '').windy, true, 'weather flags wind from 30 km/h')
+assertEqual(weather.resolveSkyScene({ openMeteoWeatherCode: 1, isDay: 1, windspeedKmph: '29' }, '').windy, false, 'weather stays calm below 30 km/h')
+assertDeepEqual(
+  weather.resolveSkyScene({ weatherCode: 389 }, weather.iconForCode(389, false)),
+  { scene: 'storm', night: false, level: 1, hail: false, windy: false },
+  'weather falls back to the bar glyph without an Open-Meteo code'
+)
+assertEqual(weather.resolveSkyScene(null, weather.iconForCode(113, true)).night, true, 'weather infers night from a night glyph without a day flag')
+assertEqual(weather.resolveSkyScene(null, '').scene, 'off', 'weather draws nothing without any condition')
+assertEqual(weather.skyMode('sun', true), 'moon', 'weather draws the moon for a clear night')
+assertEqual(weather.skyMode('partly', true), 'partly-night', 'weather draws the night variant of partly cloudy')
+assertEqual(weather.skyMode('rain', true), 'rain', 'weather keeps precipitation scenes under one name at night')
+assertDeepEqual(
+  Object.keys(weather.WMO).map(name => weather.WMO[name]).sort((x, y) => x - y),
+  Object.keys(weather.SKY_BY_WMO).map(Number).sort((x, y) => x - y),
+  'weather has a sky entry for exactly the named WMO codes'
+)
+assert(
+  Object.keys(weather.SKY_BY_WMO).every(code => weather.SKY_SCENES.indexOf(weather.SKY_BY_WMO[code].scene) >= 0),
+  'weather maps every WMO code to a drawable scene'
+)
+assertEqual(weather.resolveSkyScene({ openMeteoWeatherCode: 42, isDay: 1 }, '').scene, 'clouds', 'weather treats an unlisted WMO code as clouds')
+assertEqual(weather.resolveSkyScene(null, weather.iconForCode(182, false)).scene, 'sleet', 'weather maps the sleet glyph to sleet')
+
+const manifest = JSON.parse(fs.readFileSync(root + '/shell/plugins/panels/weather/manifest.json', 'utf8'))
+const fxSetting = (manifest.barWidget.schema || []).find(entry => entry.key === 'fx')
+assert(fxSetting && fxSetting.type === 'boolean' && fxSetting.defaultValue === true, 'weather manifest declares the fx toggle, on by default')
+assert(panelSource.includes('fxEnabled ? Model.skyMode('), 'weather panel draws nothing when the fx toggle is off')
+assert(panelSource.includes('visible: root.fxMode !== "off"'), 'weather panel hides the sky layer when the scene is off')
+assert(panelSource.includes('running: skyFx.visible && root.opened'), 'weather panel only animates the sky while the popup is open')
+assert(!panelSource.includes('onTextKey'), 'weather panel adds no key bindings for the sky')
+const skySource = panelSource.slice(panelSource.indexOf('id: skyFx'), panelSource.indexOf('id: weatherScroll'))
+assertDeepEqual(
+  [...new Set((skySource.match(/#[0-9a-fA-F]{3,8}\b/g) || []).map(hex => hex.toLowerCase()))],
+  ['#ffffff'],
+  'weather sky layer takes its colours from the theme apart from white'
+)
 JS
 
 test_tmp=$(mktemp -d)
