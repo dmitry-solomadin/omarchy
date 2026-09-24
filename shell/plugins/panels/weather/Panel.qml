@@ -153,7 +153,7 @@ Panel {
   //      It follows the Open-Meteo weather code and day flag when they are
   //      present, else the bar glyph. The "fx" widget setting turns it off.
   readonly property bool fxEnabled: setting("fx", true) !== false
-  readonly property var fxResolved: Model.resolveSkyScene(current, label)
+  readonly property var fxResolved: Model.resolveSkyScene(openMeteoCurrent || current, label)
   readonly property bool fxNight: fxResolved.night
   readonly property int fxLevel: fxResolved.level
   readonly property bool fxHail: fxResolved.hail
@@ -542,22 +542,25 @@ Panel {
         function blend(base, c, k) { return Qt.tint(base, Qt.rgba(c.r, c.g, c.b, k)) }
         // Everything is drawn in "ink": ink on dark themes, the theme's own
         // foreground on light ones, where ink would vanish into the card.
-        readonly property bool lightTheme: Color.background.hslLightness > 0.5
-        readonly property color inkColor: lightTheme ? Color.foreground : "#ffffff"
+        readonly property color surfaceBackground: Color.popups.background
+        readonly property bool lightTheme: surfaceBackground.hslLightness > 0.5
+        readonly property color inkColor: lightTheme ? Color.popups.text : "#ffffff"
         readonly property string sunCore:     blend(Color.accent, inkColor, 0.30).toString()
         readonly property string sunMid:      Color.accent.toString()
-        readonly property string sunRim:      blend(Color.accent, Color.background, 0.35).toString()
+        readonly property string sunRim:      blend(Color.accent, surfaceBackground, 0.35).toString()
         readonly property string ink:         inkColor.toString()
-        readonly property string inkSoft:     blend(inkColor, Color.background, 0.25).toString()
-        readonly property string bgTint:      blend(Color.background, inkColor, 0.55).toString()
-        readonly property string cloudDark:   blend(Color.background, Color.accent, 0.25).toString()
-        readonly property string cloudShade:  blend(inkSoft, Color.background, 0.45).toString()
-        readonly property string cloudDarker: blend(cloudDark, Color.background, 0.45).toString()
+        readonly property string inkSoft:     blend(inkColor, surfaceBackground, 0.25).toString()
+        readonly property string bgTint:      blend(surfaceBackground, inkColor, 0.55).toString()
+        readonly property string cloudDark:   blend(surfaceBackground, Color.accent, 0.25).toString()
+        readonly property string cloudShade:  blend(inkSoft, surfaceBackground, 0.45).toString()
+        readonly property string cloudDarker: blend(cloudDark, surfaceBackground, 0.45).toString()
+        readonly property string paletteKey: [sunCore, sunMid, sunRim, ink, inkSoft, bgTint, cloudDark, cloudShade, cloudDarker].join("|")
         // 4x4 ordered-dither thresholds, flattened.
         readonly property var ditherThresholds: [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5].map(function(b) { return (b + 0.5) / 16 })
 
         // 64x64 lattice of random values for value noise.
         property var noiseTable: []
+        onNoiseTableChanged: layerCache = []
         Component.onCompleted: { var tbl = []; for (var n = 0; n < 4096; n++) tbl.push(Math.random()); noiseTable = tbl }
 
         function replay() { tick = 0; openAnim.restart() }
@@ -574,7 +577,7 @@ Panel {
         // only move, so only the static canvas needs nudging: when the open
         // animation, the scene or the theme changes.
         onTChanged: stat.requestPaint()
-        onSunRimChanged: stat.requestPaint()
+        onPaletteKeyChanged: stat.requestPaint()
         Connections {
           target: root
           function onFxModeChanged() { stat.requestPaint() }
@@ -600,8 +603,9 @@ Panel {
           return 0.55 * vnoise(x, y, period) + 0.30 * vnoise(x * 2 + 7.3, y * 2 + 3.1, period * 2) + 0.15 * vnoise(x * 4 + 11.7, y * 4 + 5.9, period * 4)
         }
 
-        // Clouds and fog only drift sideways, so each is painted once into a
-        // strip one noise period wider than the card and slid along each tick.
+        // Clouds and fog only drift sideways. Cache their geometry outside
+        // Canvas: closing the layer-shell window discards its painted image.
+        // Reopening only redraws the cached runs, then slides the strip.
         function layerSpec(kind, speed, nsx, nsy, extra) {
           var spec = { kind: kind, speed: speed, nsx: nsx, nsy: nsy }
           for (var key in extra) spec[key] = extra[key]
@@ -639,22 +643,34 @@ Panel {
           return []
         }
 
-        function paintLayer(ctx, spec, cols, rows, period, width, height) {
-          ctx.clearRect(0, 0, width, height)
-          if (!spec || noiseTable.length === 0) return
-          var c = cell, thr = ditherThresholds
-          function rect(i, j, w, h, color, a) {
-            ctx.fillStyle = color; ctx.globalAlpha = a
-            ctx.fillRect(i * c, j * c, w * c, h * c)
+        // At most two recent geometries (the two fog strips). Storm and flash
+        // share an entry. Colours, alpha and scrolling speed don't shape runs.
+        property var layerCache: []
+        function layerRuns(spec, cols, rows, period) {
+          var key = JSON.stringify([cols, rows, period, spec.kind, spec.nsx, spec.nsy, spec.topOnly, spec.dens, spec.seed])
+          for (var n = 0; n < layerCache.length; n++) {
+            if (layerCache[n].key === key) {
+              var hit = layerCache.splice(n, 1)[0]
+              layerCache.push(hit)
+              return hit.runs
+            }
           }
+          var result = buildLayerRuns(spec, cols, rows, period)
+          layerCache.push({ key: key, runs: result })
+          if (layerCache.length > 2) layerCache.shift()
+          return result
+        }
+
+        function buildLayerRuns(spec, cols, rows, period) {
+          var result = [], thr = ditherThresholds
           // One row of cells as runs: level(i) returns a key (falsy = empty)
-          // and style(key) its [color, alpha].
-          function runs(j, level, style) {
+          // kept with the geometry so palettes can change without new noise.
+          function runs(j, level) {
             var runKey = null, runStart = 0
             for (var i = 0; i <= cols; i++) {
               var key = i < cols ? level(i) : null
               if (key === runKey) continue
-              if (runKey) { var st = style(runKey); rect(runStart, j, i - runStart, 1, st[0], st[1]) }
+              if (runKey) result.push([runStart, j, i - runStart, runKey])
               runKey = key; runStart = i
             }
           }
@@ -668,7 +684,6 @@ Panel {
               var env = spec.topOnly ? Math.max(0, Math.min(1, 1.7 - j / (rows * 0.40))) : (1 - 0.2 * j / rows)
               for (var i = 0; i < cols; i++) fld[j * cols + i] = fbm(i / spec.nsx, j / spec.nsy, period) * env
             }
-            var styles = { lit: [spec.lit, spec.alpha], body: [spec.body, spec.alpha], shade: [spec.shade, spec.alpha], rim: [spec.body, spec.alpha * 0.7] }
             for (var row = 0; row < H; row++) {
               runs(row, function(i) {
                 var v = fld[row * cols + i]
@@ -677,7 +692,7 @@ Panel {
                   return below < v - 0.03 ? "shade" : (above < v - 0.03 ? "lit" : "body")
                 }
                 return v >= th && (v - th) / 0.05 >= thr[((row & 3) << 2) | (i & 3)] ? "rim" : null
-              }, function(key) { return styles[key] })
+              })
             }
           } else {
             // Fog: density quantised to three alpha levels, thicker near the bottom.
@@ -686,12 +701,28 @@ Panel {
               runs(fj, function(i) {
                 var d = (fbm(i / spec.nsx + spec.seed, fj / spec.nsy + spec.seed, period) - 0.3) * fenv
                 return d <= 0.15 ? 0 : (d <= 0.4 ? 1 : (d <= 0.7 ? 2 : 3))
-              }, function(q) { return [inkSoft, 0.07 * q] })
+              })
             }
+          }
+          return result
+        }
+
+        function paintLayer(ctx, spec, cols, rows, period, width, height) {
+          ctx.clearRect(0, 0, width, height)
+          if (!spec || noiseTable.length === 0) return
+          var runs = layerRuns(spec, cols, rows, period), c = cell
+          var styles = spec.kind === "cloud"
+            ? { lit: [spec.lit, spec.alpha], body: [spec.body, spec.alpha], shade: [spec.shade, spec.alpha], rim: [spec.body, spec.alpha * 0.7] }
+            : { 1: [inkSoft, 0.07], 2: [inkSoft, 0.14], 3: [inkSoft, 0.07 * 3] }
+          for (var n = 0; n < runs.length; n++) {
+            var run = runs[n], style = styles[run[3]]
+            ctx.fillStyle = style[0]; ctx.globalAlpha = style[1]
+            ctx.fillRect(run[0] * c, run[1] * c, run[2] * c, c)
           }
         }
 
         component ScrollLayer: Canvas {
+          id: strip
           property var spec: null
           readonly property int cardCols: Math.ceil(skyFx.width / skyFx.cell)
           // Noise period in lattice cells, and the strip's repeat length in cells.
@@ -706,6 +737,11 @@ Panel {
           onSpecChanged: requestPaint()
           onWidthChanged: requestPaint()
           onHeightChanged: requestPaint()
+          Connections {
+            target: skyFx
+            function onPaletteKeyChanged() { strip.requestPaint() }
+            function onNoiseTableChanged() { strip.requestPaint() }
+          }
           onPaint: skyFx.paintLayer(getContext("2d"), spec, repeatCols + cardCols, Math.ceil(height / skyFx.cell), period, width, height)
         }
 

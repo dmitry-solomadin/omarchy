@@ -209,6 +209,81 @@ assert(
 assertEqual(weather.resolveSkyScene({ openMeteoWeatherCode: 42, isDay: 1 }, '').scene, 'clouds', 'weather treats an unlisted WMO code as clouds')
 assertEqual(weather.resolveSkyScene(null, weather.iconForCode(182, false)).scene, 'sleet', 'weather maps the sleet glyph to sleet')
 
+// Evaluate the panel's actual bindings so changing its source selection back
+// to wttr cannot pass just because the resolver works in isolation.
+const vm = require('vm')
+function panelBinding(name, context) {
+  const expression = panelSource.match(new RegExp('readonly property \\w+ ' + name + ': (.+)'))[1]
+  return vm.runInNewContext(expression, { Model: weather, ...context })
+}
+const wmoCurrent = weather.openMeteoCurrentCondition({ current: {
+  temperature_2m: 12, weather_code: 96, is_day: 0, wind_speed_10m: 35
+} })
+const wttrCurrent = { weatherCode: 389, windspeedKmph: '8' }
+for (const hasConfiguredCoordinates of [false, true]) {
+  const context = { hasConfiguredCoordinates, openMeteoCurrent: wmoCurrent,
+    report: { current_condition: [wttrCurrent] }, label: weather.iconForCode(389, false) }
+  context.current = panelBinding('current', context)
+  assertDeepEqual(panelBinding('fxResolved', context),
+    { scene: 'storm', night: true, level: 2, hail: true, windy: true },
+    'weather panel uses WMO sky data with configured coordinates ' + hasConfiguredCoordinates)
+}
+assertDeepEqual(panelBinding('fxResolved', {
+  openMeteoCurrent: null, current: wttrCurrent, label: weather.iconForCode(389, false)
+}), { scene: 'storm', night: false, level: 1, hail: false, windy: false },
+'weather panel retains glyph fallback without Open-Meteo')
+
+// Exercise the actual strip painter with a recording context. Geometry must
+// survive a new drawing context, while colours remain live and storage bounded.
+const sky = vm.createContext({
+  cell: 2, layerCache: [], inkSoft: '#aabbcc',
+  noiseTable: Array.from({ length: 4096 }, (_, n) => ((n * 7919) % 4096) / 4096),
+  ditherThresholds: [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5].map(b => (b + 0.5) / 16)
+})
+for (const name of ['hashT', 'vnoise', 'fbm', 'layerRuns', 'buildLayerRuns', 'paintLayer']) {
+  const rest = panelSource.slice(panelSource.indexOf('        function ' + name + '('))
+  const firstLine = rest.split('\n')[0]
+  const source = firstLine.endsWith('}') ? firstLine : rest.slice(0, rest.indexOf('\n        }') + 10)
+  vm.runInContext(source, sky)
+}
+let noiseCalls = 0
+const fbm = sky.fbm
+sky.fbm = (...args) => { noiseCalls++; return fbm(...args) }
+function drawStrip(spec, cols = 180, rows = 50) {
+  const output = []
+  const ctx = { clearRect() {}, fillRect(...rect) { output.push([...rect, this.fillStyle, this.globalAlpha]) } }
+  sky.paintLayer(ctx, spec, cols, rows, 2, cols * 2, rows * 2)
+  return output
+}
+const cloud = { kind: 'cloud', nsx: 51, nsy: 30, topOnly: true, dens: 0.09,
+  lit: '#eeeeee', body: '#bbbbbb', shade: '#777777', alpha: 0.5, speed: 4.2 }
+const coldCloud = drawStrip(cloud)
+assert(coldCloud.length > 0 && noiseCalls > 0, 'weather builds drawable cloud geometry on first paint')
+noiseCalls = 0
+assertDeepEqual(drawStrip(cloud), coldCloud, 'weather replays identical cloud runs into a new context')
+assertEqual(noiseCalls, 0, 'weather reopening does not regenerate cloud noise')
+const flashCloud = drawStrip({ ...cloud, lit: '#ffffff', body: '#dddddd', alpha: 0.7, speed: 9 })
+assertEqual(noiseCalls, 0, 'weather storm flash, opacity and wind reuse cloud geometry')
+assert(JSON.stringify(flashCloud) !== JSON.stringify(coldCloud), 'weather cached cloud geometry uses the new palette')
+drawStrip({ ...cloud, dens: 0.03 })
+assert(noiseCalls > 0, 'weather rebuilds geometry when cloud density changes')
+noiseCalls = 0
+drawStrip(cloud, 200)
+assert(noiseCalls > 0, 'weather rebuilds geometry when strip dimensions change')
+const fog = { kind: 'fog', nsx: 66, nsy: 24, seed: 0 }
+const fogOther = { kind: 'fog', nsx: 42, nsy: 16.5, seed: 3.7 }
+const coldFog = drawStrip(fog)
+drawStrip(fogOther)
+noiseCalls = 0
+assertDeepEqual(drawStrip(fog), coldFog, 'weather replays identical fog runs into a new context')
+drawStrip(fogOther)
+assertEqual(noiseCalls, 0, 'weather retains both fog geometries across reopens')
+sky.inkSoft = '#112233'
+const recoloredFog = drawStrip(fog)
+assert(recoloredFog.length > 0 && recoloredFog.every(run => run[4] === '#112233'), 'weather fog repaints in the current palette')
+assertEqual(noiseCalls, 0, 'weather recoloring fog does not regenerate noise')
+assertEqual(sky.layerCache.length, 2, 'weather bounds strip storage after scene and size changes')
+
 const manifest = JSON.parse(fs.readFileSync(root + '/shell/plugins/panels/weather/manifest.json', 'utf8'))
 const fxSetting = (manifest.barWidget.schema || []).find(entry => entry.key === 'fx')
 assert(fxSetting && fxSetting.type === 'boolean' && fxSetting.defaultValue === true, 'weather manifest declares the fx toggle, on by default')
