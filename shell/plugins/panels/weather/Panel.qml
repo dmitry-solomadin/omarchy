@@ -624,6 +624,10 @@ Panel {
         function fbm(x, y, period) {
           return 0.55 * vnoise(x, y, period) + 0.30 * vnoise(x * 2 + 7.3, y * 2 + 3.1, period * 2) + 0.15 * vnoise(x * 4 + 11.7, y * 4 + 5.9, period * 4)
         }
+        // The noise period for a strip about two cards long. A multiple of
+        // four, so the strip also repeats the 4x4 dither on cloud rims and
+        // wraps without a seam, whatever the layer's horizontal scale.
+        function stripPeriod(cardCols, nsx) { return 4 * Math.max(1, Math.min(4, Math.round(cardCols / nsx / 2))) }
 
         // Clouds and fog only drift sideways. Cache their geometry outside
         // Canvas: closing the layer-shell window discards its painted image.
@@ -748,7 +752,7 @@ Panel {
           property var spec: null
           readonly property int cardCols: Math.ceil(skyFx.width / skyFx.cell)
           // Noise period in lattice cells, and the strip's repeat length in cells.
-          readonly property int period: spec ? Math.max(2, Math.min(16, Math.round(2 * cardCols / spec.nsx))) : 1
+          readonly property int period: spec ? skyFx.stripPeriod(cardCols, spec.nsx) : 1
           readonly property int repeatCols: spec ? period * spec.nsx : 0
           visible: spec !== null
           height: parent.height

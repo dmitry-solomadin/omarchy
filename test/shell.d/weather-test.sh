@@ -240,7 +240,7 @@ const sky = vm.createContext({
   noiseTable: Array.from({ length: 4096 }, (_, n) => ((n * 7919) % 4096) / 4096),
   ditherThresholds: [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5].map(b => (b + 0.5) / 16)
 })
-for (const name of ['hashT', 'vnoise', 'fbm', 'layerRuns', 'buildLayerRuns', 'paintLayer']) {
+for (const name of ['hashT', 'vnoise', 'fbm', 'stripPeriod', 'layerRuns', 'buildLayerRuns', 'paintLayer']) {
   const rest = panelSource.slice(panelSource.indexOf('        function ' + name + '('))
   const firstLine = rest.split('\n')[0]
   const source = firstLine.endsWith('}') ? firstLine : rest.slice(0, rest.indexOf('\n        }') + 10)
@@ -283,6 +283,22 @@ const recoloredFog = drawStrip(fog)
 assert(recoloredFog.length > 0 && recoloredFog.every(run => run[4] === '#112233'), 'weather fog repaints in the current palette')
 assertEqual(noiseCalls, 0, 'weather recoloring fog does not regenerate noise')
 assertEqual(sky.layerCache.length, 2, 'weather bounds strip storage after scene and size changes')
+
+// A strip jumps back by its repeat length when it wraps, so the cells that
+// come into view must match the ones that leave, dithered cloud rims included.
+for (const spec of [cloud, fog, fogOther]) {
+  const seams = []
+  for (const cardCols of [120, 180, 240, 300, 360]) {
+    const period = sky.stripPeriod(cardCols, spec.nsx), repeatCols = period * spec.nsx
+    const cols = repeatCols + cardCols, rows = 50, cells = new Map()
+    for (const [start, row, length, key] of sky.buildLayerRuns(spec, cols, rows, period))
+      for (let i = start; i < start + length; i++) cells.set(row * cols + i, key)
+    for (let row = 0; row < rows; row++)
+      for (let i = 0; i < cardCols; i++)
+        if (cells.get(row * cols + i) !== cells.get(row * cols + i + repeatCols)) { seams.push(cardCols); row = rows; break }
+  }
+  assertDeepEqual(seams, [], `weather ${spec.kind} strip ${spec.nsx} wraps without a seam on any card width`)
+}
 
 const manifest = JSON.parse(fs.readFileSync(root + '/shell/plugins/panels/weather/manifest.json', 'utf8'))
 const fxSetting = (manifest.barWidget.schema || []).find(entry => entry.key === 'fx')
