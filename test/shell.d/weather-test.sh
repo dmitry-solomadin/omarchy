@@ -307,6 +307,7 @@ assert(panelSource.includes('fxEnabled ? Model.skyMode('), 'weather panel draws 
 assert(panelSource.includes('visible: root.fxMode !== "off"'), 'weather panel hides the sky layer when the scene is off')
 assert(panelSource.includes('running: skyFx.visible && root.opened && !Style.reduceMotion'), 'weather panel only animates the sky while the popup is open and motion is allowed')
 assert(panelSource.includes('duration: Style.duration(900)'), 'weather sky opens without animating under reduced motion')
+assert(panelSource.includes('layer.enabled: Style.cornerRadius > 0') && panelSource.includes('maskSource: skyMask'), 'weather sky is masked to rounded popup corners')
 const panelRootSource = panelSource.slice(0, panelSource.indexOf('content: PanelKeyCatcher'))
 assert(!/\bskyFx\./.test(panelRootSource), 'weather sky replays from inside the lazily built panel content')
 assert(!panelSource.includes('onTextKey'), 'weather panel adds no key bindings for the sky')

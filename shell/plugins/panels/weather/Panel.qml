@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Effects
 import Quickshell
 import Quickshell.Io
 import qs.Commons
@@ -542,6 +543,15 @@ Panel {
         clip: true
         visible: root.fxMode !== "off"
         z: 0
+        // The card rounds its corners but does not clip its children, so on
+        // rounded popups the sky is masked to the card's inner shape.
+        layer.enabled: Style.cornerRadius > 0
+        layer.effect: MultiEffect {
+          maskEnabled: true
+          maskSource: skyMask
+          maskThresholdMin: 0.3
+          maskSpreadAtMin: 0.3
+        }
 
         property real t: 0        // 0 → 1 while the panel opens
         property int tick: 0      // 30 Hz clock since the panel opened; drives all motion
@@ -977,6 +987,15 @@ Panel {
             if (windy) wind(24, inkSoft, 0.28 * t)
           }
         }
+      }
+
+      // The card's shape inside its border, for the sky's mask.
+      Rectangle {
+        id: skyMask
+        anchors.fill: skyFx
+        radius: Math.max(0, Style.cornerRadius - Border.top(panel.borderSpec))
+        visible: false
+        layer.enabled: skyFx.layer.enabled
       }
 
       Flickable {
