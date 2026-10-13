@@ -555,16 +555,16 @@ Panel {
         function blend(base, c, k) { return Qt.tint(base, Qt.rgba(c.r, c.g, c.b, k)) }
         // Everything is drawn in "ink": ink on dark themes, the theme's own
         // foreground on light ones, where ink would vanish into the card.
-        readonly property color surfaceBackground: Color.popups.background
+        readonly property color surfaceBackground: Commons.Color.popups.background
         readonly property bool lightTheme: surfaceBackground.hslLightness > 0.5
-        readonly property color inkColor: lightTheme ? Color.popups.text : "#ffffff"
-        readonly property string sunCore:     blend(Color.accent, inkColor, 0.30).toString()
-        readonly property string sunMid:      Color.accent.toString()
-        readonly property string sunRim:      blend(Color.accent, surfaceBackground, 0.35).toString()
+        readonly property color inkColor: lightTheme ? Commons.Color.popups.text : "#ffffff"
+        readonly property string sunCore:     blend(Commons.Color.accent, inkColor, 0.30).toString()
+        readonly property string sunMid:      Commons.Color.accent.toString()
+        readonly property string sunRim:      blend(Commons.Color.accent, surfaceBackground, 0.35).toString()
         readonly property string ink:         inkColor.toString()
         readonly property string inkSoft:     blend(inkColor, surfaceBackground, 0.25).toString()
         readonly property string bgTint:      blend(surfaceBackground, inkColor, 0.55).toString()
-        readonly property string cloudDark:   blend(surfaceBackground, Color.accent, 0.25).toString()
+        readonly property string cloudDark:   blend(surfaceBackground, Commons.Color.accent, 0.25).toString()
         readonly property string cloudShade:  blend(inkSoft, surfaceBackground, 0.45).toString()
         readonly property string cloudDarker: blend(cloudDark, surfaceBackground, 0.45).toString()
         readonly property string paletteKey: [sunCore, sunMid, sunRim, ink, inkSoft, bgTint, cloudDark, cloudShade, cloudDarker].join("|")
