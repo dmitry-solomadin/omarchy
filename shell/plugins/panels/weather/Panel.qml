@@ -160,7 +160,6 @@ Panel {
   readonly property bool fxHail: fxResolved.hail
   readonly property bool fxWindy: fxResolved.windy
   readonly property string fxMode: fxEnabled ? Model.skyMode(fxResolved.scene, fxNight) : "off"
-  onOpenedChanged: if (opened) skyFx.replay()
 
   function refresh() {
     // Each full refresh cycle gets a fresh retry budget, so an earlier
@@ -574,7 +573,12 @@ Panel {
         // 64x64 lattice of random values for value noise.
         property var noiseTable: []
         onNoiseTableChanged: layerCache = []
-        Component.onCompleted: { var tbl = []; for (var n = 0; n < 4096; n++) tbl.push(Math.random()); noiseTable = tbl }
+        // The panel builds its content on first open, so that open replays
+        // from here and later ones from onOpenedChanged below.
+        Component.onCompleted: {
+          var tbl = []; for (var n = 0; n < 4096; n++) tbl.push(Math.random()); noiseTable = tbl
+          if (root.opened) replay()
+        }
 
         function replay() { tick = 0; openAnim.restart() }
 
@@ -594,6 +598,7 @@ Panel {
         Connections {
           target: root
           function onFxModeChanged() { stat.requestPaint() }
+          function onOpenedChanged() { if (root.opened) skyFx.replay() }
         }
 
         Timer {

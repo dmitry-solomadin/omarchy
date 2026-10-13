@@ -290,6 +290,8 @@ assert(fxSetting && fxSetting.type === 'boolean' && fxSetting.defaultValue === t
 assert(panelSource.includes('fxEnabled ? Model.skyMode('), 'weather panel draws nothing when the fx toggle is off')
 assert(panelSource.includes('visible: root.fxMode !== "off"'), 'weather panel hides the sky layer when the scene is off')
 assert(panelSource.includes('running: skyFx.visible && root.opened'), 'weather panel only animates the sky while the popup is open')
+const panelRootSource = panelSource.slice(0, panelSource.indexOf('content: PanelKeyCatcher'))
+assert(!/\bskyFx\./.test(panelRootSource), 'weather sky replays from inside the lazily built panel content')
 assert(!panelSource.includes('onTextKey'), 'weather panel adds no key bindings for the sky')
 const skySource = panelSource.slice(panelSource.indexOf('id: skyFx'), panelSource.indexOf('id: weatherScroll'))
 assertDeepEqual(
