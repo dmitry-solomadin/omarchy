@@ -580,30 +580,34 @@ Panel {
           if (root.opened) replay()
         }
 
-        function replay() { tick = 0; openAnim.restart() }
+        function replay() { tick = 0; openAnim.restart(); repaint() }
 
         NumberAnimation {
           id: openAnim
           target: skyFx
           property: "t"
           from: 0; to: 1
-          duration: 900
+          duration: Style.duration(900)
           easing.type: Easing.OutCubic
         }
         // The dynamic canvas repaints on every tick and the scrolling layers
         // only move, so only the static canvas needs nudging: when the open
-        // animation, the scene or the theme changes.
-        onTChanged: stat.requestPaint()
-        onPaletteKeyChanged: stat.requestPaint()
+        // animation, the scene or the theme changes. With reduced motion the
+        // clock stays stopped and the dynamic canvas holds a still frame, so
+        // it is nudged too.
+        function repaint() { stat.requestPaint(); if (!clock.running) dyn.requestPaint() }
+        onTChanged: repaint()
+        onPaletteKeyChanged: repaint()
         Connections {
           target: root
-          function onFxModeChanged() { stat.requestPaint() }
+          function onFxModeChanged() { skyFx.repaint() }
           function onOpenedChanged() { if (root.opened) skyFx.replay() }
         }
 
         Timer {
+          id: clock
           interval: 33; repeat: true
-          running: skyFx.visible && root.opened
+          running: skyFx.visible && root.opened && !Style.reduceMotion
           onTriggered: { skyFx.tick++; dyn.requestPaint() }
         }
 
